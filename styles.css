@@ -280,3 +280,17 @@ main:focus{outline:none}
 .toast.show{opacity:1;visibility:visible}
 .notes-form .seg,.check .seg{justify-self:start;width:auto}
 .check .seg{grid-column:auto}
+.center{text-align:center}
+.center-row{justify-content:center}
+.setup-note{background:#FFF1B8;border-radius:16px;padding:12px 16px;font-weight:700;max-width:34em}
+.code-big{font-family:var(--display);font-weight:900;font-size:clamp(2.4rem,9vw,3.6rem);letter-spacing:.18em;color:var(--rose);margin:.2em 0;
+  background:var(--blush);border-radius:18px;padding:.15em .4em;display:inline-block;user-select:all}
+.code-input{text-transform:uppercase;letter-spacing:.2em;font-weight:900!important}
+.me-pill{display:inline-flex;align-items:center;gap:6px;background:var(--blush);border-radius:99px;padding:.3em .8em .3em .3em;font-weight:800}
+.waiting{background:#FFF1B8;border-radius:16px;padding:12px 16px;max-width:640px;margin:0 0 16px;font-weight:700}
+.wyr-opt .pick button[disabled]{cursor:default;opacity:.85}
+.env.mine{cursor:default}
+.loading{opacity:.6;pointer-events:none}
+.capduo div.pending{background:#fff;border:2px dashed var(--pink)}
+.cap-reply{display:flex;gap:8px;margin:8px 4px}
+.cap-reply input{flex:1;min-width:0}

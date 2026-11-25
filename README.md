@@ -2,21 +2,23 @@
 
 **A tiny private world for just the two of you.**
 
-Usie is a cute, couples-only web app: two profiles (her + him), a "synergy" reading, a private shared feed with editable captions and sticker reactions, silly games (caption-this, would-you-rather, open-when notes) and growth tools (weekly check-in, gratitude jar, shared bucket list).
-
 Live: https://bapdagreat.github.io/usie/
 
-## How privacy works (first build)
+Couples-only web app: each partner signs in on their own phone, one creates a couple and shares a 6-letter invite code, the other joins (max 2). Then: her + him profiles and a synergy reading, a shared feed (photos, inline-editable captions with an "edited" flag, sticker reactions, live updates), caption-offs, would-you-rather, open-when notes, weekly check-ins, a gratitude jar and a shared bucket list.
 
-- No server, no accounts, no analytics. It's plain HTML/CSS/JS on GitHub Pages.
-- Everything is stored in **this browser's IndexedDB**, encrypted with **AES-GCM**. The key is derived from your couple passcode with PBKDF2 (150k iterations). Lock = key forgotten from memory.
-- Photos are resized and compressed in the browser before saving.
-- You can download an encrypted backup and restore it on another device (same passcode).
+## Stack
+- Static site on GitHub Pages (`index.html`, `styles.css`, `app.js`, `config.js`)
+- [Supabase](https://supabase.com): Auth (email + password or magic link), Postgres with Row Level Security, private Storage bucket `usie-photos`, Realtime
+- `config.js` holds the project URL and the **publishable** key, which is safe in the browser. No secret keys live in this repo.
 
-### Honest limitation
-Because GitHub Pages is static, **two phones don't sync**. Usie works on one shared device (or by moving backups). Real two-device private sync needs a backend as a next step, e.g. **Supabase** (auth + Postgres row-level security + storage) or **Firebase** (Auth + Firestore security rules), ideally with end-to-end encryption using the same passcode-derived key.
+## Database
+`supabase/schema.sql` is idempotent. Paste it into Supabase → SQL Editor → Run (safe to re-run).
+- `couples` (invite code), `couple_members` (one couple per user, unique role per couple → max 2)
+- `profiles`, `posts`, `reactions`, `notes`, `wyr_answers`, `checkins`, `gratitude`, `bucket_items`
+- RPCs: `create_couple(role)`, `join_couple(code)`, `leave_couple()` (security definer)
+- RLS: only the two members of a couple can read/write its rows; photos live at `<couple_id>/<file>.jpg` and storage policies check membership too. Anonymous users get nothing.
 
-## Files
-- `index.html` – all screens (landing, passcode, onboarding, synergy, feed, play, grow, us)
-- `styles.css` – design, animations, `prefers-reduced-motion` support
-- `app.js` – storage, crypto, and all features
+## Supabase dashboard settings
+- Authentication → URL Configuration: Site URL `https://bapdagreat.github.io/usie/`, and add the same URL to Redirect URLs.
+- Authentication → Sign In / Providers → Email: "Confirm email" is on by default (partners must tap the email link). Turn it off for instant sign-up.
+- Supabase's built-in email sender is rate limited; add custom SMTP (Authentication → Emails → SMTP) before real use.

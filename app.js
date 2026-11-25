@@ -1,49 +1,19 @@
-/* Usie: a tiny private world for two.
- * Everything is stored in this browser (IndexedDB), encrypted with AES-GCM using a key
- * derived from the couple passcode (PBKDF2). GitHub Pages is static hosting, so there is
- * no server: two phones do NOT sync. Real two-device private sync needs a backend
- * (e.g. Supabase or Firebase with auth + row-level security). See README.md.
+/* Usie: a tiny private world for two, synced with Supabase.
+ * Each partner has their own Supabase Auth account. One creates a couple and shares the
+ * invite code, the other joins with it (max 2). Row Level Security (supabase/schema.sql)
+ * makes every row and photo readable only by the two members of that couple.
  */
 (() => {
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
-const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const pick = a => a[Math.floor(Math.random() * a.length)];
+const other = r => r === "her" ? "him" : "her";
 
-/* ---------- tiny IndexedDB key-value ---------- */
-const idb = (() => {
-  let dbp;
-  const open = () => dbp ||= new Promise((res, rej) => {
-    const r = indexedDB.open("usie", 1);
-    r.onupgradeneeded = () => r.result.createObjectStore("kv");
-    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
-  });
-  const tx = async (mode, fn) => { const db = await open(); return new Promise((res, rej) => {
-    const t = db.transaction("kv", mode); const req = fn(t.objectStore("kv"));
-    t.oncomplete = () => res(req && req.result); t.onerror = () => rej(t.error); }); };
-  return { get: k => tx("readonly", s => s.get(k)), set: (k, v) => tx("readwrite", s => s.put(v, k)), del: k => tx("readwrite", s => s.delete(k)) };
-})();
-
-/* ---------- crypto ---------- */
-const enc = new TextEncoder(), dec = new TextDecoder();
-const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
-const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
-async function deriveKey(pass, salt) {
-  const base = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveKey"]);
-  return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: 150000, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
-}
-async function sealState(key, salt, obj) {
-  // chunked base64 to avoid call-stack limits on big photos
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, enc.encode(JSON.stringify(obj)));
-  return { v: 1, salt: b64(salt), iv: b64(iv), ct: new Uint8Array(ct) };
-}
-async function openState(key, vault) {
-  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(vault.iv) }, key, vault.ct);
-  return JSON.parse(dec.decode(pt));
-}
+const CFG = window.USIE_CONFIG || {};
+const sb = window.supabase?.createClient(CFG.url, CFG.key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+const BUCKET = "usie-photos";
 
 /* ---------- images ---------- */
 function compress(file, max = 1280, q = 0.82) {
@@ -53,7 +23,7 @@ function compress(file, max = 1280, q = 0.82) {
       const s = Math.min(1, max / Math.max(img.width, img.height));
       const c = document.createElement("canvas"); c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
       c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
-      res(c.toDataURL("image/jpeg", q));
+      c.toBlob(b => b ? res({ blob: b, url: URL.createObjectURL(b) }) : rej(new Error("Couldn't read that photo.")), "image/jpeg", q);
     };
     img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("That file didn't look like a photo.")); };
     img.src = url;
@@ -136,115 +106,246 @@ const STICKERS = [
 ];
 
 /* ---------- state ---------- */
-let KEY = null, SALT = null, S = null, saveT = null;
-const fresh = () => ({ v: 1, created: Date.now(), her: null, him: null, posts: [], notes: [], checks: [], jar: [], bucket: [],
-  wyr: { i: 0, a: {} }, ui: { who: "her" } });
-function save() {
-  clearTimeout(saveT);
-  saveT = setTimeout(async () => {
-    try { await idb.set("vault", await sealState(KEY, SALT, S)); }
-    catch (e) { toast("Couldn't save. Your browser storage might be full."); console.error(e); }
-  }, 250);
-}
+let USER = null, S = null, channel = null, curView = "landing", photoUrls = {}, schemaOk = true;
+const myRole = () => S?.me?.role;
 const nameOf = w => S?.[w]?.nick || S?.[w]?.name || (w === "her" ? "Her" : "Him");
-const photoOf = w => S?.[w]?.photo || placeholder(w);
+const photoOf = w => (S?.[w]?.photo_path && photoUrls[S[w].photo_path]) || placeholder(w);
+const urlOf = path => path ? photoUrls[path] || "" : "";
+
+function friendly(e) {
+  const m = (e && (e.message || e.error_description || e.msg)) || String(e || "");
+  if (/PGRST205|schema cache|does not exist/i.test(m)) return "Usie's database isn't set up yet. Run supabase/schema.sql in the Supabase SQL Editor first.";
+  if (/Invalid login credentials/i.test(m)) return "That email and password don't match. Try again, cutie.";
+  if (/Email not confirmed/i.test(m)) return "Check your inbox and tap the confirmation link first.";
+  if (/already registered/i.test(m)) return "You already have an account. Tap \"Sign in\" below.";
+  if (/rate limit|too many/i.test(m)) return "Too many emails too fast. Wait a minute and try again.";
+  if (/Failed to fetch|NetworkError/i.test(m)) return "Can't reach the love server. Check your internet.";
+  return m.replace(/^.*?:\s(?=[A-Z])/, "") || "Something went wrong.";
+}
+const must = r => { if (r.error) throw r.error; return r.data; };
 
 /* ---------- ui helpers ---------- */
-function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2600); }
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2800); }
 function show(id) {
+  curView = id;
   $$(".view").forEach(v => v.hidden = v.id !== "v-" + id);
   const inApp = ["feed", "play", "grow", "us"].includes(id);
   $("#topbar").hidden = !inApp;
-  $$(".tab").forEach(t => t.toggleAttribute("aria-current", false) || (t.dataset.tab === id && t.setAttribute("aria-current", "page")));
+  $$(".tab").forEach(t => t.dataset.tab === id ? t.setAttribute("aria-current", "page") : t.removeAttribute("aria-current"));
   window.scrollTo(0, 0); $("#app").focus({ preventScroll: true });
-  if (id === "feed") renderFeed(); if (id === "play") renderPlay(); if (id === "grow") renderGrow(); if (id === "us") renderUs();
+  renderCurrent();
 }
-function seg(el, value, onPick) {
-  el.innerHTML = ["her", "him"].map(w => `<button type="button" role="radio" aria-checked="${w === value}" data-w="${w}"><img src="${photoOf(w)}" alt="">${esc(nameOf(w))}</button>`).join("");
-  el.onclick = e => { const b = e.target.closest("button"); if (!b) return; $$("button", el).forEach(x => x.setAttribute("aria-checked", x === b)); onPick(b.dataset.w); };
+function renderCurrent() {
+  if (curView === "feed") renderFeed(); if (curView === "play") renderPlay(); if (curView === "grow") renderGrow(); if (curView === "us") renderUs();
 }
-const ago = ts => { const m = Math.round((Date.now() - ts) / 60000);
+async function busy(btn, fn) {
+  btn && (btn.disabled = true, btn.classList.add("loading"));
+  try { return await fn(); } catch (e) { console.warn(e); toast(friendly(e)); } finally { btn && (btn.disabled = false, btn.classList.remove("loading")); }
+}
+const ago = ts => { const t = new Date(ts).getTime(), m = Math.round((Date.now() - t) / 60000);
   if (m < 1) return "just now"; if (m < 60) return m + "m ago"; const h = Math.round(m / 60); if (h < 24) return h + "h ago";
-  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" }); };
+  return new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" }); };
+const mePill = () => `<img class="mini" src="${photoOf(myRole())}" alt="">${esc(nameOf(myRole()))}`;
 
-/* ---------- landing + lock ---------- */
-let lockMode = "create";
+/* ---------- boot ---------- */
 async function boot() {
-  const has = await idb.get("vault").catch(() => null);
-  $("#startBtn").hidden = !!has; $("#unlockBtn").hidden = !has;
+  if (!sb) { $("#setupNote").hidden = false; $("#setupNote").textContent = "Couldn't load the love server library. Check your connection and refresh."; $("#startBtn").hidden = $("#unlockBtn").hidden = true; show("landing"); return; }
+  const { data: { session } } = await sb.auth.getSession();
+  USER = session?.user || null;
+  // Probe tables only when signed in (anon is locked out by design, so an anon probe would 401).
+  if (USER) {
+    const probe = await sb.from("couples").select("id", { head: true, count: "exact" }).limit(1);
+    schemaOk = !(probe.error && /PGRST205|schema cache|42P01/i.test((probe.error.code || "") + (probe.error.message || "")));
+  }
+  if (!schemaOk) {
+    $("#setupNote").hidden = false;
+    $("#setupNote").textContent = "Almost ready! Usie's database tables haven't been created yet. (Owner: paste supabase/schema.sql into Supabase > SQL Editor and press Run.)";
+    $("#startBtn").hidden = $("#unlockBtn").hidden = true; show("landing"); return;
+  }
+  if (USER) return enterApp();
   show("landing");
 }
-$("#startBtn").onclick = () => openLock("create");
-$("#unlockBtn").onclick = () => openLock("unlock");
-$("#backToLanding").onclick = boot;
-function openLock(mode) {
-  lockMode = mode;
-  const c = mode === "create";
-  $("#lockTitle").textContent = c ? "Make your secret handshake" : "Knock knock. Who's cute?";
-  $("#lockSub").textContent = c ? "Pick a couple passcode only you two know. Your anniversary, your first pet together, the word he always mispronounces. It locks and encrypts everything in here."
-    : "Enter your couple passcode. If you're not one of the two, this is awkward. Please leave.";
-  $("#pass2").hidden = !c; $("#pass2").required = c;
-  $("#lockSubmit").textContent = c ? "Lock it in" : "Let us in";
-  $("#lockErr").textContent = ""; $("#lockForm").reset();
-  show("lock"); setTimeout(() => $("#pass1").focus(), 50);
-}
-$("#lockForm").onsubmit = async e => {
-  e.preventDefault();
-  const p1 = $("#pass1").value, err = $("#lockErr");
-  if (p1.length < 4) return (err.textContent = "At least 4 characters, lovebirds.");
-  $("#lockSubmit").disabled = true;
+let entering = false;
+async function enterApp() {
+  if (entering) return; entering = true;
   try {
-    if (lockMode === "create") {
-      if (p1 !== $("#pass2").value) { err.textContent = "Those don't match. Communication is key, huh?"; return; }
-      SALT = crypto.getRandomValues(new Uint8Array(16)); KEY = await deriveKey(p1, SALT); S = fresh();
-      await idb.set("vault", await sealState(KEY, SALT, S));
-      startOnboard(0);
-    } else {
-      const vault = await idb.get("vault"); SALT = unb64(vault.salt); KEY = await deriveKey(p1, SALT);
-      try { S = await openState(KEY, vault); } catch { KEY = null; err.textContent = "Nope. Try the passcode, not your ex's birthday."; $(".lockcard").classList.add("shake"); setTimeout(() => $(".lockcard").classList.remove("shake"), 450); return; }
-      if (!S.her) startOnboard(0); else if (!S.him) startOnboard(1); else show("feed");
-    }
-  } finally { $("#lockSubmit").disabled = false; }
-};
-$("#lockNow").onclick = () => { KEY = null; S = null; toast("Locked. See you two soon."); boot(); };
+    const mem = must(await sb.from("couple_members").select("couple_id, role").eq("user_id", USER.id).maybeSingle());
+    if (!mem) { S = null; $("#coupleErr").textContent = ""; show("couple"); return; }
+    S = { me: { id: USER.id, role: mem.role }, coupleId: mem.couple_id };
+    await loadAll(); subscribe();
+    if (!S[myRole()]) startOnboard(); else show("feed");
+  } catch (e) { toast(friendly(e)); show("landing"); }
+  finally { entering = false; }
+}
+sb?.auth.onAuthStateChange((ev, session) => {
+  const was = USER?.id; USER = session?.user || null;
+  if (ev === "SIGNED_IN" && USER && USER.id !== was && schemaOk) enterApp();
+  if (ev === "SIGNED_OUT") { teardown(); }
+});
+function teardown() { if (channel) { sb.removeChannel(channel); channel = null; } S = null; photoUrls = {}; }
 
-/* ---------- onboarding ---------- */
-let step = 0, pendingPhoto = null;
-const COPY = {
-  her: { eye: "Ladies first", title: "Let's meet <em>her</em>", sub: "The one who laughs at her own jokes before the punchline. Answer honestly. He'll see this.", next: "Next up: him", name: "Her actual name", nick: "what he calls you" },
-  him: { eye: "Your turn, handsome", title: "Now, <em>him</em>", sub: "The one who says he's not hungry and then eats half her fries. Be real. She's reading.", next: "Show us our synergy", name: "His actual name", nick: "what she calls you" },
+/* ---------- data ---------- */
+async function loadAll() {
+  const cid = S.coupleId, q = t => sb.from(t).select("*").eq("couple_id", cid);
+  const [couple, members, profiles, posts, reacts, notes, wyr, checks, jar, bucket] = await Promise.all([
+    sb.from("couples").select("*").eq("id", cid).single(), sb.from("couple_members").select("*").eq("couple_id", cid),
+    q("profiles"), q("posts").order("created_at", { ascending: false }).limit(200), q("reactions"),
+    q("notes").order("created_at", { ascending: false }), q("wyr_answers"),
+    q("checkins").order("created_at", { ascending: false }).limit(20), q("gratitude").order("created_at"), q("bucket_items").order("created_at"),
+  ]).then(rs => rs.map(must));
+  S.couple = couple; S.members = members;
+  S.her = profiles.find(p => p.role === "her") || null; S.him = profiles.find(p => p.role === "him") || null;
+  const rx = {}; reacts.forEach(r => ((rx[r.post_id] ||= {})[r.sticker] ||= []).push(r));
+  S.posts = posts.map(p => ({ ...p, reacts: rx[p.id] || {} }));
+  S.notes = notes; S.checks = checks; S.jar = jar; S.bucket = bucket;
+  S.wyr = { i: couple.wyr_index || 0, a: {} }; wyr.forEach(w => (S.wyr.a[w.question] ||= {})[w.role] = w.choice);
+  await signPhotos([S.her?.photo_path, S.him?.photo_path, ...S.posts.map(p => p.photo_path)]);
+}
+async function signPhotos(paths) {
+  const need = [...new Set(paths.filter(p => p && !photoUrls[p]))]; if (!need.length) return;
+  const { data, error } = await sb.storage.from(BUCKET).createSignedUrls(need, 60 * 60 * 6);
+  if (error) { console.warn(error); return; }
+  data.forEach(d => { if (d.signedUrl) photoUrls[d.path] = d.signedUrl; });
+}
+async function upload(blob) {
+  const path = `${S.coupleId}/${crypto.randomUUID()}.jpg`;
+  must(await sb.storage.from(BUCKET).upload(path, blob, { contentType: "image/jpeg", upsert: false }));
+  return path;
+}
+let refreshT = null;
+function subscribe() {
+  if (channel) sb.removeChannel(channel);
+  channel = sb.channel("usie-" + S.coupleId);
+  ["posts", "reactions", "notes", "profiles", "wyr_answers", "checkins", "gratitude", "bucket_items"].forEach(table =>
+    channel.on("postgres_changes", { event: "*", schema: "public", table, filter: `couple_id=eq.${S.coupleId}` }, payload => {
+      const who = payload.new?.author || payload.new?.user_id;
+      if (payload.eventType === "INSERT" && who && who !== USER.id) toast(`${nameOf(other(myRole()))} just added something`);
+      refreshSoon();
+    }));
+  channel.subscribe();
+}
+function refreshSoon() {
+  clearTimeout(refreshT);
+  refreshT = setTimeout(async () => {
+    if (!S) return;
+    const a = document.activeElement;
+    if (a && (a.isContentEditable || /INPUT|TEXTAREA/.test(a.tagName)) && curView === "feed") return refreshSoon(); // don't clobber typing
+    try { await loadAll(); renderCurrent(); } catch (e) { console.warn(e); }
+  }, 400);
+}
+async function reload() { await loadAll(); renderCurrent(); }
+
+/* ---------- landing + auth ---------- */
+let authMode = "signup";
+$("#startBtn").onclick = () => openAuth("signup");
+$("#unlockBtn").onclick = () => openAuth("signin");
+$("#backToLanding").onclick = () => show("landing");
+$("#authToggle").onclick = () => openAuth(authMode === "signup" ? "signin" : "signup");
+function openAuth(mode) {
+  authMode = mode; const up = mode === "signup";
+  $("#lockTitle").textContent = up ? "Get your own key" : "Knock knock. Who's cute?";
+  $("#lockSub").textContent = up ? "Each of you makes your own little account, then you link up with a secret code. Your person does this on their phone too."
+    : "Sign in with your email and password. If you're not one of the two, this is awkward. Please leave.";
+  $("#lockSubmit").textContent = up ? "Create my key" : "Let me in";
+  $("#authToggle").textContent = up ? "Already have an account? Sign in" : "New here? Create an account";
+  $("#pass1").autocomplete = up ? "new-password" : "current-password";
+  $("#lockErr").textContent = "";
+  show("lock"); setTimeout(() => $("#email").focus(), 50);
+}
+const redirectTo = () => location.origin + location.pathname;
+$("#lockForm").onsubmit = async e => {
+  e.preventDefault(); const email = $("#email").value.trim(), password = $("#pass1").value, err = $("#lockErr");
+  err.textContent = "";
+  await busy($("#lockSubmit"), async () => {
+    if (authMode === "signup") {
+      const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo() } });
+      if (error) { err.textContent = friendly(error); return; }
+      if (!data.session) { err.textContent = ""; toast("Check your inbox!"); $("#lockSub").textContent = `We sent a confirmation link to ${email}. Tap it on this phone and you'll land right back here, signed in.`; return; }
+      USER = data.user; enterApp();
+    } else {
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) { err.textContent = friendly(error); $(".lockcard").classList.add("shake"); setTimeout(() => $(".lockcard").classList.remove("shake"), 450); return; }
+      USER = data.user; enterApp();
+    }
+  });
 };
-function startOnboard(s) {
-  step = s; const w = s === 0 ? "her" : "him", c = COPY[w], p = S[w] || {}, f = $("#profileForm");
-  f.reset(); pendingPhoto = p.photo || null;
+$("#magicBtn").onclick = async () => {
+  const email = $("#email").value.trim(); if (!email) { $("#lockErr").textContent = "Type your email first, then tap the magic link."; $("#email").focus(); return; }
+  await busy($("#magicBtn"), async () => {
+    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo() } });
+    if (error) { $("#lockErr").textContent = friendly(error); return; }
+    $("#lockErr").textContent = ""; $("#lockSub").textContent = `Magic link sent to ${email}. Open it on this phone and poof, you're in.`; toast("Magic link sent!");
+  });
+};
+async function signOut() { await sb.auth.signOut(); teardown(); USER = null; toast("Signed out. See you soon, lovebird."); show("landing"); }
+$("#lockNow").onclick = signOut; $("#signOutBtn").onclick = signOut; $("#signOut2").onclick = signOut;
+
+/* ---------- couple link ---------- */
+$("#createCouple").onclick = () => busy($("#createCouple"), async () => {
+  const role = $("input[name=myrole]:checked").value;
+  const c = must(await sb.rpc("create_couple", { p_role: role }));
+  S = { me: { id: USER.id, role }, coupleId: c.id }; await loadAll(); subscribe(); showInvite(true);
+});
+$("#joinForm").onsubmit = e => { e.preventDefault(); busy($("#joinForm button"), async () => {
+  $("#coupleErr").textContent = "";
+  const r = await sb.rpc("join_couple", { p_code: $("#joinCode").value.trim().toUpperCase() });
+  if (r.error) { $("#coupleErr").textContent = r.error.message.includes("third") || r.error.message.includes("code") ? r.error.message : friendly(r.error); return; }
+  entering = false; await enterApp(); toast("Linked! It's official official.");
+}); };
+function showInvite(fresh) {
+  $("#invCode").textContent = S.couple.invite_code;
+  $("#invEyebrow").textContent = fresh ? "Step 2 of 3 · your secret code" : "Your secret code";
+  $("#invNext").textContent = S[myRole()] ? "Back to us" : "Now, my profile";
+  show("invite");
+}
+$("#copyCode").onclick = async () => {
+  const text = `Join me on Usie, our tiny private world for two 💌 ${redirectTo()}  Our secret code: ${S.couple.invite_code}`;
+  try { if (navigator.share) await navigator.share({ text }); else { await navigator.clipboard.writeText(text); toast("Copied! Now send it to your person."); } } catch {}
+};
+$("#invNext").onclick = () => S[myRole()] ? show("us") : startOnboard();
+$("#showCode").onclick = () => showInvite(false);
+
+/* ---------- onboarding (each partner fills their own) ---------- */
+let pendingPhoto = null;
+const COPY = {
+  her: { eye: "Ladies first (always)", title: "Let's meet <em>her</em>", sub: "The one who laughs at her own jokes before the punchline. Answer honestly. He'll see this.", name: "Your actual name", nick: "what he calls you" },
+  him: { eye: "Your turn, handsome", title: "Now, <em>him</em>", sub: "The one who says he's not hungry and then eats half her fries. Be real. She's reading.", name: "Your actual name", nick: "what she calls you" },
+};
+function startOnboard() {
+  const w = myRole(), c = COPY[w], p = S[w] || {}, f = $("#profileForm");
+  f.reset(); pendingPhoto = null;
   f.classList.toggle("him-mode", w === "him");
-  $("#pfEyebrow").textContent = c.eye; $("#pfTitle").innerHTML = c.title; $("#pfSub").textContent = c.sub; $("#pfNext").textContent = c.next;
-  f.name.placeholder = c.name; f.nick.placeholder = c.nick;
-  $("#pfBack").hidden = s === 0;
+  $("#pfEyebrow").textContent = c.eye; $("#pfTitle").innerHTML = c.title; $("#pfSub").textContent = c.sub;
+  $("#pfNext").textContent = S[other(w)] ? "Show us our synergy" : "Save my profile";
+  f.name.placeholder = c.name; f.nick.placeholder = c.nick; $("#pfBack").hidden = true;
+  const ans = p.answers || {};
   $("#pfQuestions").innerHTML = QUESTIONS.map(q => `<fieldset class="q"><legend>${esc(q.q)}</legend><div class="chips">${
-    q.o.map((o, i) => `<label class="chip"><input type="radio" name="q_${q.k}" value="${i}" ${p.q?.[q.k] === i ? "checked" : ""} required><span>${esc(o)}</span></label>`).join("")}</div></fieldset>`).join("");
+    q.o.map((o, i) => `<label class="chip"><input type="radio" name="q_${q.k}" value="${i}" ${ans[q.k] === i ? "checked" : ""} required><span>${esc(o)}</span></label>`).join("")}</div></fieldset>`).join("");
   ["name", "nick", "bday", "lang", "noticed", "food"].forEach(k => { if (p[k]) f[k].value = p[k]; });
-  setPreview(pendingPhoto);
-  $$(".dot").forEach(d => d.classList.toggle("on", +d.dataset.s === s));
+  setPreview(p.photo_path ? photoOf(w) : null);
   show("onboard");
 }
 function setPreview(src) { $("#pfPreview").hidden = !src; if (src) $("#pfPreview").src = src; $("#pfEmpty").hidden = !!src; }
 $("#pfPhoto").onchange = async e => { const f = e.target.files[0]; if (!f) return;
-  try { pendingPhoto = await compress(f, 480, 0.85); setPreview(pendingPhoto); toast("Cute. Very cute."); } catch (er) { toast(er.message); } };
-$("#pfBack").onclick = () => startOnboard(0);
-$("#profileForm").onsubmit = e => {
-  e.preventDefault(); const f = e.target, w = step === 0 ? "her" : "him";
-  const q = {}; QUESTIONS.forEach(x => { const v = f["q_" + x.k].value; q[x.k] = v === "" ? null : +v; });
-  S[w] = { name: f.name.value.trim(), nick: f.nick.value.trim(), bday: f.bday.value, lang: f.lang.value, noticed: f.noticed.value.trim(), food: f.food.value.trim(), photo: pendingPhoto, q };
-  save();
-  if (step === 0) startOnboard(1); else showSynergy();
-};
+  try { pendingPhoto = await compress(f, 480, 0.85); setPreview(pendingPhoto.url); toast("Cute. Very cute."); } catch (er) { toast(er.message); } };
+$("#profileForm").onsubmit = e => { e.preventDefault(); busy($("#pfNext"), async () => {
+  const f = e.target, w = myRole(), answers = {};
+  QUESTIONS.forEach(x => { const v = f["q_" + x.k].value; answers[x.k] = v === "" ? null : +v; });
+  let photo_path = S[w]?.photo_path || null;
+  if (pendingPhoto) { photo_path = await upload(pendingPhoto.blob); photoUrls[photo_path] = pendingPhoto.url; }
+  must(await sb.from("profiles").upsert({ couple_id: S.coupleId, role: w, user_id: USER.id, name: f.name.value.trim(), nick: f.nick.value.trim(),
+    bday: f.bday.value || null, lang: f.lang.value, noticed: f.noticed.value.trim(), food: f.food.value.trim(), photo_path, answers, updated_at: new Date().toISOString() }));
+  await loadAll();
+  if (S[other(w)]) showSynergy();
+  else { toast("Saved! Now we wait for your person."); show("feed"); }
+}); };
 
 /* ---------- synergy ---------- */
 function showSynergy() {
-  const h = S.her, m = S.him; let matches = 0;
-  const rows = QUESTIONS.map((q, i) => { const same = h.q[q.k] === m.q[q.k]; if (same) matches++;
-    return `<li class="${same ? "match" : ""}"><span class="tag">${same ? "match" : "balance"}</span><div><b>${esc(q.q.replace(/\?$/, ""))}:</b> ${esc(nameOf("her"))} said ${esc(q.o[h.q[q.k]])}, ${esc(nameOf("him"))} said ${esc(q.o[m.q[q.k]])}. <span class="muted">${same ? MATCH_LINES[i % 3] : DIFF_LINES[i % 3]}</span></div></li>`; });
+  const h = S.her, m = S.him; if (!h || !m) return toast(`Waiting for ${h ? "him" : "her"} to fill in their profile first.`);
+  let matches = 0; const ha = h.answers || {}, ma = m.answers || {};
+  const rows = QUESTIONS.map((q, i) => { const same = ha[q.k] === ma[q.k]; if (same) matches++;
+    return `<li class="${same ? "match" : ""}"><span class="tag">${same ? "match" : "balance"}</span><div><b>${esc(q.q.replace(/\?$/, ""))}:</b> ${esc(nameOf("her"))} said ${esc(q.o[ha[q.k]] ?? "-")}, ${esc(nameOf("him"))} said ${esc(q.o[ma[q.k]] ?? "-")}. <span class="muted">${same ? MATCH_LINES[i % 3] : DIFF_LINES[i % 3]}</span></div></li>`; });
   const sameLang = h.lang === m.lang;
   rows.push(`<li class="${sameLang ? "match" : ""}"><span class="tag">love</span><div><b>Love languages:</b> to love ${esc(nameOf("her"))} well, ${esc(LANG_TIPS[h.lang] || "")} To love ${esc(nameOf("him"))} well, ${esc(LANG_TIPS[m.lang] || "")}</div></li>`);
   const score = Math.min(99, Math.round(62 + (matches / QUESTIONS.length) * 33 + (sameLang ? 4 : 0)));
@@ -261,160 +362,198 @@ function showSynergy() {
   out.textContent = n + "%"; if (!reduce) { const t = setInterval(() => { n = Math.min(score, n + 2); out.textContent = n + "%"; if (n >= score) clearInterval(t); }, 25); }
 }
 $("#synGo").onclick = () => show("feed");
-$("#synRedo").onclick = () => startOnboard(0);
+$("#synRedo").textContent = "Edit my profile";
+$("#synRedo").onclick = startOnboard;
 
 /* ---------- feed ---------- */
 let postPhoto = null;
 $$(".tab").forEach(t => t.onclick = () => show(t.dataset.tab));
-function renderFeed() {
-  const days = Math.max(1, Math.ceil((Date.now() - S.created) / 864e5));
-  $("#greet").innerHTML = `Hey <span class="hand">${esc(nameOf("her"))} &amp; ${esc(nameOf("him"))}</span>. ${esc(pick(GREETS))} <span class="tiny">Day ${days} of Usie.</span>`;
-  seg($("#whoSeg"), S.ui.who, w => { S.ui.who = w; save(); });
-  $("#promptChip").textContent = "Need a nudge? " + pick(POST_PROMPTS);
-  const feed = $("#feed");
-  feed.innerHTML = S.posts.slice().sort((a, b) => b.ts - a.ts).map(postHTML).join("");
+function waitingBanner() {
+  const o = other(myRole());
+  if (S.members.length < 2) return `<div class="waiting">Your person hasn't joined yet. Send them your code <b>${esc(S.couple.invite_code)}</b> <button class="linkish" data-act="code">share it</button></div>`;
+  if (!S[o]) return `<div class="waiting">${o === "her" ? "She" : "He"} joined but hasn't filled in a profile yet. Gently nag. Lovingly.</div>`;
+  return "";
 }
+function renderFeed() {
+  const days = Math.max(1, Math.ceil((Date.now() - new Date(S.couple.created_at)) / 864e5));
+  const names = S[other(myRole())] ? `${esc(nameOf("her"))} &amp; ${esc(nameOf("him"))}` : esc(nameOf(myRole()));
+  $("#greet").innerHTML = `${waitingBanner()}Hey <span class="hand">${names}</span>. ${esc(pick(GREETS))} <span class="tiny">Day ${days} of Usie.</span>`;
+  $("#whoMe").innerHTML = mePill();
+  $("#promptChip").textContent = "Need a nudge? " + pick(POST_PROMPTS);
+  $("#feed").innerHTML = S.posts.map(postHTML).join("");
+}
+$("#greet").addEventListener("click", e => { if (e.target.closest("[data-act=code]")) showInvite(false); });
 function postHTML(p) {
-  const r = p.reacts || {};
-  const body = p.type === "cap"
-    ? `${p.photo ? `<img class="post-photo" src="${p.photo}" alt="Caption-this photo">` : `<p class="caption" style="cursor:default">${esc(p.prompt)}</p>`}
-       <div class="capduo"><div><small>${esc(nameOf("her"))}</small>${esc(p.capHer)}</div><div><small>${esc(nameOf("him"))}</small>${esc(p.capHim)}</div></div>`
-    : `${p.photo ? `<img class="post-photo" src="${p.photo}" alt="Photo posted by ${esc(nameOf(p.by))}" loading="lazy">` : ""}
-       <p class="caption" contenteditable="true" spellcheck="true" data-id="${p.id}" aria-label="Caption, tap to edit">${esc(p.caption)}</p>
-       ${p.edited ? `<p class="edited">edited ${ago(p.edited)}</p>` : ""}`;
+  const r = p.reacts || {}, mine = p.author === USER.id;
+  let body;
+  if (p.kind === "cap") {
+    const missing = !p.cap_her ? "her" : !p.cap_him ? "him" : null;
+    const cell = w => { const v = w === "her" ? p.cap_her : p.cap_him;
+      return v ? `<div><small>${esc(nameOf(w))}</small>${esc(v)}</div>` : `<div class="pending"><small>${esc(nameOf(w))}</small>${w === myRole() ? "your turn!" : "thinking..."}</div>`; };
+    body = `${p.photo_path ? `<img class="post-photo" src="${urlOf(p.photo_path)}" alt="Caption-this photo">` : `<p class="caption" style="cursor:default">${esc(p.prompt)}</p>`}
+      <div class="capduo">${cell("her")}${cell("him")}</div>
+      ${missing === myRole() ? `<form class="cap-reply" data-cap="${p.id}"><label class="sr" for="cr_${p.id}">Your caption</label><input id="cr_${p.id}" maxlength="120" required placeholder="your comeback"><button class="btn primary small">Add mine</button></form>` : ""}`;
+  } else {
+    body = `${p.photo_path ? `<img class="post-photo" src="${urlOf(p.photo_path)}" alt="Photo posted by ${esc(nameOf(p.by_role))}" loading="lazy">` : ""}
+      <p class="caption" contenteditable="true" spellcheck="true" data-id="${p.id}" aria-label="Caption, tap to edit">${esc(p.caption)}</p>
+      ${p.edited ? `<p class="edited">edited ${ago(p.edited_at)}</p>` : ""}`;
+  }
   return `<li class="post" data-id="${p.id}">
-    <div class="post-head"><img src="${photoOf(p.by)}" alt=""><div><b>${esc(nameOf(p.by))}${p.type === "cap" ? " started a caption-off" : ""}</b><time>${ago(p.ts)}</time></div>
-    <button class="del" data-del="${p.id}" aria-label="Delete post">delete</button></div>
+    <div class="post-head"><img src="${photoOf(p.by_role)}" alt=""><div><b>${esc(nameOf(p.by_role))}${p.kind === "cap" ? " started a caption-off" : ""}</b><time>${ago(p.created_at)}</time></div>
+    ${mine ? `<button class="del" data-del="${p.id}" aria-label="Delete post">delete</button>` : ""}</div>
     ${body}
-    <div class="reacts">${STICKERS.map(s => { const who = r[s.k] || []; return `<button class="react ${who.includes(S.ui.who) ? "on" : ""}" data-r="${s.k}" data-id="${p.id}" aria-label="${s.label} sticker, ${who.length}" aria-pressed="${who.includes(S.ui.who)}">${s.svg}${who.length ? `<span>${who.length}</span>` : ""}</button>`; }).join("")}</div>
+    <div class="reacts">${STICKERS.map(s => { const list = r[s.k] || [], on = list.some(x => x.user_id === USER.id);
+      return `<button class="react ${on ? "on" : ""}" data-r="${s.k}" data-id="${p.id}" aria-label="${s.label} sticker, ${list.length}" aria-pressed="${on}">${s.svg}${list.length ? `<span>${list.length}</span>` : ""}</button>`; }).join("")}</div>
   </li>`;
 }
 $("#postPhoto").onchange = async e => { const f = e.target.files[0]; if (!f) return;
-  try { postPhoto = await compress(f); $("#postPreview").src = postPhoto; $("#postPreview").hidden = false; $("#attachName").textContent = "photo ready"; } catch (er) { toast(er.message); } };
-$("#composer").onsubmit = e => {
-  e.preventDefault(); const text = $("#postText").value.trim();
+  try { postPhoto = await compress(f); $("#postPreview").src = postPhoto.url; $("#postPreview").hidden = false; $("#attachName").textContent = "photo ready"; } catch (er) { toast(er.message); } };
+$("#composer").onsubmit = e => { e.preventDefault(); busy($("#composer .btn.primary"), async () => {
+  const text = $("#postText").value.trim();
   if (!text && !postPhoto) return toast("Say something sweet first. Or at least a photo.");
-  S.posts.push({ id: uid(), by: S.ui.who, caption: text, photo: postPhoto, ts: Date.now(), reacts: {} });
+  let photo_path = null;
+  if (postPhoto) { photo_path = await upload(postPhoto.blob); photoUrls[photo_path] = postPhoto.url; }
+  must(await sb.from("posts").insert({ couple_id: S.coupleId, by_role: myRole(), caption: text, photo_path }));
   postPhoto = null; e.target.reset(); $("#postPreview").hidden = true; $("#attachName").textContent = "";
-  save(); renderFeed(); toast(pick(["Posted. They're gonna love it.", "Delivered with a kiss.", "Into the feed it goes."]));
-};
+  await reload(); toast(pick(["Posted. They're gonna love it.", "Delivered with a kiss.", "Into the feed it goes."]));
+}); };
 $("#promptChip").onclick = () => { $("#postText").value = $("#promptChip").textContent.replace("Need a nudge? ", "") + "\n"; $("#postText").focus(); };
 $("#feed").addEventListener("click", e => {
   const r = e.target.closest(".react");
-  if (r) { const p = S.posts.find(x => x.id === r.dataset.id); p.reacts ||= {}; const arr = p.reacts[r.dataset.r] ||= [];
-    const i = arr.indexOf(S.ui.who); i >= 0 ? arr.splice(i, 1) : arr.push(S.ui.who); save();
-    const li = r.closest(".post"); li.outerHTML = postHTML(p);
-    const nr = $(`.post[data-id="${p.id}"] .react[data-r="${r.dataset.r}"]`); nr?.classList.add("bump"); nr?.focus(); return; }
+  if (r) return busy(null, async () => {
+    const p = S.posts.find(x => x.id === r.dataset.id), k = r.dataset.r, on = (p.reacts[k] || []).some(x => x.user_id === USER.id);
+    if (on) must(await sb.from("reactions").delete().match({ post_id: p.id, user_id: USER.id, sticker: k }));
+    else must(await sb.from("reactions").insert({ post_id: p.id, couple_id: S.coupleId, role: myRole(), sticker: k }));
+    await reload(); const nr = $(`.post[data-id="${p.id}"] .react[data-r="${k}"]`); nr?.classList.add("bump"); nr?.focus();
+  });
   const d = e.target.closest("[data-del]");
-  if (d && confirm("Delete this post? No take-backs.")) { S.posts = S.posts.filter(x => x.id !== d.dataset.del); save(); renderFeed(); }
+  if (d && confirm("Delete this post? No take-backs.")) busy(d, async () => {
+    const p = S.posts.find(x => x.id === d.dataset.del);
+    must(await sb.from("posts").delete().eq("id", p.id));
+    if (p.photo_path && !S.posts.some(x => x.id !== p.id && x.photo_path === p.photo_path)) await sb.storage.from(BUCKET).remove([p.photo_path]);
+    await reload();
+  });
 });
+$("#feed").addEventListener("submit", e => { const f = e.target.closest("[data-cap]"); if (!f) return; e.preventDefault();
+  busy(f.querySelector("button"), async () => {
+    const col = myRole() === "her" ? "cap_her" : "cap_him";
+    must(await sb.from("posts").update({ [col]: f.querySelector("input").value.trim() }).eq("id", f.dataset.cap));
+    await reload(); toast("Caption-off complete. Vote with stickers!");
+  }); });
 $("#feed").addEventListener("keydown", e => { if (e.target.classList.contains("caption") && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.target.blur(); } });
 $("#feed").addEventListener("focusout", e => {
   const c = e.target; if (!c.classList?.contains("caption") || !c.dataset.id) return;
   const p = S.posts.find(x => x.id === c.dataset.id); const v = c.innerText.trim();
-  if (p && v !== p.caption) { p.caption = v; p.edited = Date.now(); save(); toast("Caption updated. Much punnier."); }
+  if (p && v !== (p.caption || "")) busy(null, async () => {
+    must(await sb.from("posts").update({ caption: v, edited: true, edited_at: new Date().toISOString() }).eq("id", p.id));
+    p.caption = v; p.edited = true; p.edited_at = new Date().toISOString(); toast("Caption updated. Much punnier."); setTimeout(reload, 50);
+  });
 });
 
 /* ---------- play ---------- */
 let capItem = null;
 function renderPlay() {
-  $$("[data-cap]").forEach(x => x.textContent = nameOf(x.dataset.cap) + "'s caption");
+  $$("[data-cap=me]").forEach(x => x.textContent = `Your caption, ${nameOf(myRole())}`);
   if (!capItem) shuffleCap();
   renderWyr(); renderNotes();
 }
 function shuffleCap() {
-  const photos = S.posts.filter(p => p.photo && p.type !== "cap");
-  capItem = photos.length && Math.random() < 0.6 ? { photo: pick(photos).photo } : { prompt: pick(CAP_PROMPTS) };
-  $("#capStage").innerHTML = capItem.photo ? `<img src="${capItem.photo}" alt="A photo from your feed">` : `<p>"${esc(capItem.prompt)}"</p>`;
-  $("#capHer").value = ""; $("#capHim").value = "";
+  const photos = S.posts.filter(p => p.photo_path && p.kind !== "cap");
+  capItem = photos.length && Math.random() < 0.6 ? { photo_path: pick(photos).photo_path } : { prompt: pick(CAP_PROMPTS) };
+  $("#capStage").innerHTML = capItem.photo_path ? `<img src="${urlOf(capItem.photo_path)}" alt="A photo from your feed">` : `<p>"${esc(capItem.prompt)}"</p>`;
+  $("#capMine").value = "";
 }
 $("#capShuffle").onclick = shuffleCap;
-$("#capSave").onclick = () => {
-  const h = $("#capHer").value.trim(), m = $("#capHim").value.trim();
-  if (!h || !m) return toast("Both of you need a caption. No hiding.");
-  S.posts.push({ id: uid(), type: "cap", by: S.ui.who, ts: Date.now(), photo: capItem.photo || null, prompt: capItem.prompt || "", capHer: h, capHim: m, reacts: {} });
-  save(); capItem = null; shuffleCap(); toast("Saved to your feed. Now vote with stickers.");
-};
+$("#capSave").onclick = () => busy($("#capSave"), async () => {
+  const v = $("#capMine").value.trim(); if (!v) return toast("Write your caption first. No hiding.");
+  must(await sb.from("posts").insert({ couple_id: S.coupleId, by_role: myRole(), kind: "cap", photo_path: capItem.photo_path || null, prompt: capItem.prompt || "",
+    [myRole() === "her" ? "cap_her" : "cap_him"]: v }));
+  capItem = null; await loadAll(); shuffleCap(); toast(`Posted! Now ${nameOf(other(myRole()))} adds theirs.`);
+});
 function renderWyr() {
-  const i = S.wyr.i % WYR.length, a = S.wyr.a[i] || {};
-  $("#wyrQ").textContent = `Question ${i + 1} of ${WYR.length}. Both of you pick, no peeking.`;
-  $("#wyrOpts").innerHTML = WYR[i].map((o, n) => `<div class="wyr-opt">${esc(o)}<div class="pick">
-    <button class="her ${a.her === n ? "on" : ""}" data-w="her" data-n="${n}" aria-pressed="${a.her === n}">${esc(nameOf("her"))}</button>
-    <button class="him ${a.him === n ? "on" : ""}" data-w="him" data-n="${n}" aria-pressed="${a.him === n}">${esc(nameOf("him"))}</button></div></div>`).join("");
-  $("#wyrRes").textContent = a.her == null || a.him == null ? "" : a.her === a.him ? "Same pick! Great minds, cute faces." : "Split decision. Loser of the next rock-paper-scissors explains themselves.";
+  const i = S.wyr.i % WYR.length, a = S.wyr.a[i] || {}, me = myRole(), o = other(me), iPicked = a[me] != null;
+  $("#wyrQ").textContent = `Question ${i + 1} of ${WYR.length}. Pick yours. Theirs shows after you choose.`;
+  $("#wyrOpts").innerHTML = WYR[i].map((opt, n) => `<div class="wyr-opt">${esc(opt)}<div class="pick">
+    <button class="${me} ${a[me] === n ? "on" : ""}" data-n="${n}" aria-pressed="${a[me] === n}">${a[me] === n ? "My pick" : "Pick this"}</button>
+    ${iPicked && a[o] === n ? `<button class="${o} on" disabled>${esc(nameOf(o))}</button>` : ""}</div></div>`).join("");
+  $("#wyrRes").textContent = !iPicked ? "" : a[o] == null ? `Waiting for ${nameOf(o)} to pick...` : a[me] === a[o] ? "Same pick! Great minds, cute faces." : "Split decision. Loser of the next rock-paper-scissors explains themselves.";
 }
-$("#wyrOpts").onclick = e => { const b = e.target.closest("button"); if (!b) return; const i = S.wyr.i % WYR.length;
-  (S.wyr.a[i] ||= {})[b.dataset.w] = +b.dataset.n; save(); renderWyr(); };
-$("#wyrNext").onclick = () => { S.wyr.i++; save(); renderWyr(); };
-let noteFrom = "her";
+$("#wyrOpts").onclick = e => { const b = e.target.closest("button[data-n]"); if (!b) return; busy(null, async () => {
+  const i = S.wyr.i % WYR.length;
+  must(await sb.from("wyr_answers").upsert({ couple_id: S.coupleId, question: i, role: myRole(), choice: +b.dataset.n, updated_at: new Date().toISOString() }));
+  (S.wyr.a[i] ||= {})[myRole()] = +b.dataset.n; renderWyr();
+}); };
+$("#wyrNext").onclick = () => busy($("#wyrNext"), async () => {
+  must(await sb.from("couples").update({ wyr_index: S.wyr.i + 1 }).eq("id", S.coupleId)); S.wyr.i++; S.couple.wyr_index = S.wyr.i; renderWyr();
+});
 function renderNotes() {
-  seg($("#noteFrom"), noteFrom, w => noteFrom = w);
-  $("#envelopes").innerHTML = S.notes.slice().reverse().map(n => n.opened
-    ? `<li><div class="env open"><span class="lbl">Open when ${esc(n.when.replace(/^open when\s*/i, ""))}<small>from ${esc(nameOf(n.from))}</small></span><span class="body">${esc(n.body)}</span></div></li>`
-    : `<li><button class="env" data-note="${n.id}" aria-label="Sealed note: open when ${esc(n.when)}"><span class="flap"></span><svg class="seal"><use href="#heart"/></svg><span class="lbl">Open when ${esc(n.when.replace(/^open when\s*/i, ""))}<small>from ${esc(nameOf(n.from))} · sealed</small></span></button></li>`).join("")
-    || `<li class="tiny">No envelopes yet. Write the first one, romantic.</li>`;
+  const me = myRole();
+  $("#envelopes").innerHTML = S.notes.map(n => {
+    const when = esc(n.open_when.replace(/^open when\s*/i, ""));
+    if (n.opened_at) return `<li><div class="env open"><span class="lbl">Open when ${when}<small>from ${esc(nameOf(n.from_role))} · opened ${ago(n.opened_at)}</small></span><span class="body">${esc(n.body)}</span></div></li>`;
+    if (n.from_role === me) return `<li><div class="env mine"><span class="flap"></span><svg class="seal"><use href="#heart"/></svg><span class="lbl">Open when ${when}<small>from you · still sealed</small></span></div></li>`;
+    return `<li><button class="env" data-note="${n.id}" aria-label="Sealed note: open when ${when}"><span class="flap"></span><svg class="seal"><use href="#heart"/></svg><span class="lbl">Open when ${when}<small>from ${esc(nameOf(n.from_role))} · for you</small></span></button></li>`;
+  }).join("") || `<li class="tiny">No envelopes yet. Write the first one, romantic.</li>`;
 }
-$("#noteForm").onsubmit = e => { e.preventDefault();
-  S.notes.push({ id: uid(), from: noteFrom, when: $("#noteWhen").value.trim(), body: $("#noteBody").value.trim(), ts: Date.now(), opened: false });
-  e.target.reset(); save(); renderNotes(); toast("Sealed. Mwah."); };
+$("#noteForm").onsubmit = e => { e.preventDefault(); busy($("#noteForm .btn"), async () => {
+  must(await sb.from("notes").insert({ couple_id: S.coupleId, from_role: myRole(), open_when: $("#noteWhen").value.trim(), body: $("#noteBody").value.trim() }));
+  e.target.reset(); await reload(); toast("Sealed. Mwah.");
+}); };
 $("#envelopes").onclick = e => { const b = e.target.closest("[data-note]"); if (!b) return; const n = S.notes.find(x => x.id === b.dataset.note);
-  if (confirm(`Is it really time? Open when ${n.when.replace(/^open when\s*/i, "")}`)) { n.opened = Date.now(); save(); renderNotes(); } };
+  if (confirm(`Is it really time? Open when ${n.open_when.replace(/^open when\s*/i, "")}`)) busy(null, async () => {
+    must(await sb.from("notes").update({ opened_at: new Date().toISOString() }).eq("id", n.id)); await reload(); }); };
 
 /* ---------- grow ---------- */
-let checkWho = "her";
 function renderGrow() {
-  seg($("#checkWho"), checkWho, w => checkWho = w);
-  $("#checks").innerHTML = S.checks.slice().reverse().slice(0, 8).map(c =>
-    `<li><b>${esc(nameOf(c.who))}</b> · ${new Date(c.ts).toLocaleDateString(undefined, { month: "short", day: "numeric" })} · felt loved <b>${c.loved}/10</b>, quality time <b>${c.time}/10</b>
+  $("#checkWho").innerHTML = `Checking in as ${mePill()}`;
+  $("#checks").innerHTML = S.checks.slice(0, 8).map(c =>
+    `<li><b>${esc(nameOf(c.role))}</b> · ${new Date(c.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })} · felt loved <b>${c.loved}/10</b>, quality time <b>${c.quality}/10</b>
      ${c.liked ? `<br>Loved: ${esc(c.liked)}` : ""}${c.more ? `<br>More of: ${esc(c.more)}` : ""}</li>`).join("");
   renderJar(false); renderBucket();
 }
 ["1", "2"].forEach(n => $("#c" + n).oninput = e => $("#o" + n).textContent = e.target.value);
-$("#checkForm").onsubmit = e => { e.preventDefault();
-  S.checks.push({ id: uid(), who: checkWho, loved: +$("#c1").value, time: +$("#c2").value, liked: $("#c3").value.trim(), more: $("#c4").value.trim(), ts: Date.now() });
-  $("#c3").value = ""; $("#c4").value = ""; save(); renderGrow(); toast("Check-in saved. Proud of you two."); };
+$("#checkForm").onsubmit = e => { e.preventDefault(); busy($("#checkForm .btn"), async () => {
+  must(await sb.from("checkins").insert({ couple_id: S.coupleId, role: myRole(), loved: +$("#c1").value, quality: +$("#c2").value, liked: $("#c3").value.trim(), more: $("#c4").value.trim() }));
+  $("#c3").value = ""; $("#c4").value = ""; await reload(); toast("Check-in saved. Proud of you two.");
+}); };
 function renderJar(animLast) {
-  const g = $("#jarHearts"), cols = ["#E2455C", "#F7A1AE", "#F2B84B", "#5B8C7A", "#B8293F"];
-  g.innerHTML = S.jar.slice(-24).map((j, i) => { const x = 40 + (i * 37) % 70, y = 150 - Math.floor(i / 3) * 14;
-    return `<use href="#heart" x="${x}" y="${y}" width="20" height="20" color="${cols[i % 5]}" ${animLast && i === Math.min(S.jar.length, 24) - 1 ? "" : 'style="animation:none"'}/>`; }).join("");
+  const g = $("#jarHearts"), cols = ["#E2455C", "#F7A1AE", "#F2B84B", "#5B8C7A", "#B8293F"], list = S.jar.slice(-24);
+  g.innerHTML = list.map((j, i) => { const x = 40 + (i * 37) % 70, y = 150 - Math.floor(i / 3) * 14;
+    return `<use href="#heart" x="${x}" y="${y}" width="20" height="20" color="${cols[i % 5]}" ${animLast && i === list.length - 1 ? "" : 'style="animation:none"'}/>`; }).join("");
   $("#jarCount").textContent = S.jar.length;
 }
-$("#jarForm").onsubmit = e => { e.preventDefault(); S.jar.push({ id: uid(), text: $("#jarText").value.trim(), ts: Date.now() }); e.target.reset(); save(); renderJar(true); toast("Plop. Into the jar."); };
+$("#jarForm").onsubmit = e => { e.preventDefault(); busy($("#jarForm .btn"), async () => {
+  must(await sb.from("gratitude").insert({ couple_id: S.coupleId, text: $("#jarText").value.trim() })); e.target.reset(); await loadAll(); renderJar(true); toast("Plop. Into the jar.");
+}); };
 $("#jarPull").onclick = () => { $("#jarPulled").textContent = S.jar.length ? "\u201C" + pick(S.jar).text + "\u201D" : "The jar is empty. Fill it with tiny thank-yous first."; };
 function renderBucket() {
   $("#bucket").innerHTML = S.bucket.map(b => `<li class="${b.done ? "done" : ""}"><input type="checkbox" id="b_${b.id}" data-b="${b.id}" ${b.done ? "checked" : ""}><label for="b_${b.id}" style="font-weight:700;flex-direction:row"><span>${esc(b.text)}</span></label><button class="x" data-bx="${b.id}" aria-label="Remove">×</button></li>`).join("");
   const d = S.bucket.filter(b => b.done).length;
   $("#bucketMeta").textContent = S.bucket.length ? `${d} of ${S.bucket.length} done. ${d === S.bucket.length ? "Time to dream bigger." : "Keep going, adventurers."}` : "Start with something small. Then something wild.";
 }
-$("#bucketForm").onsubmit = e => { e.preventDefault(); S.bucket.push({ id: uid(), text: $("#bucketText").value.trim(), done: false }); e.target.reset(); save(); renderBucket(); };
-$("#bucket").onclick = e => { const x = e.target.closest("[data-bx]"); if (x) { S.bucket = S.bucket.filter(b => b.id !== x.dataset.bx); save(); renderBucket(); } };
-$("#bucket").onchange = e => { const b = S.bucket.find(x => x.id === e.target.dataset.b); if (b) { b.done = e.target.checked; save(); renderBucket(); if (b.done) toast("Look at you two, checking things off."); } };
+$("#bucketForm").onsubmit = e => { e.preventDefault(); busy($("#bucketForm .btn"), async () => {
+  must(await sb.from("bucket_items").insert({ couple_id: S.coupleId, text: $("#bucketText").value.trim() })); e.target.reset(); await reload();
+}); };
+$("#bucket").onclick = e => { const x = e.target.closest("[data-bx]"); if (x) busy(null, async () => { must(await sb.from("bucket_items").delete().eq("id", x.dataset.bx)); await reload(); }); };
+$("#bucket").onchange = e => { const b = S.bucket.find(x => x.id === e.target.dataset.b); if (b) busy(null, async () => {
+  must(await sb.from("bucket_items").update({ done: e.target.checked }).eq("id", b.id)); await reload(); if (e.target.checked) toast("Look at you two, checking things off."); }); };
 
 /* ---------- us ---------- */
 function renderUs() {
-  $("#usCards").innerHTML = ["her", "him"].map(w => { const p = S[w]; return `<article class="card us-card"><img src="${photoOf(w)}" alt="${esc(nameOf(w))}">
+  $("#usCards").innerHTML = ["her", "him"].map(w => { const p = S[w];
+    if (!p) return `<article class="card us-card"><img src="${placeholder(w)}" alt=""><h3>${w === "her" ? "Her" : "Him"}</h3><p class="muted">${S.members.length < 2 ? "Hasn't joined yet. Share your code!" : "Joined, profile coming soon."}</p></article>`;
+    const a = p.answers || {};
+    return `<article class="card us-card"><img src="${photoOf(w)}" alt="${esc(nameOf(w))}">
     <h3>${esc(p.name)}${p.nick ? ` <em>"${esc(p.nick)}"</em>` : ""}</h3>
     <dl><dt>Love language</dt><dd>${esc(p.lang)}</dd>${p.bday ? `<dt>Birthday</dt><dd>${esc(new Date(p.bday + "T00:00").toLocaleDateString(undefined, { month: "long", day: "numeric" }))}</dd>` : ""}
-    ${QUESTIONS.map(q => `<dt>${esc(q.q)}</dt><dd>${esc(q.o[p.q[q.k]] ?? "-")}</dd>`).join("")}
+    ${QUESTIONS.map(q => `<dt>${esc(q.q)}</dt><dd>${esc(q.o[a[q.k]] ?? "-")}</dd>`).join("")}
     ${p.food ? `<dt>Comfort food</dt><dd>${esc(p.food)}</dd>` : ""}${p.noticed ? `<dt>First noticed</dt><dd>${esc(p.noticed)}</dd>` : ""}</dl></article>`; }).join("");
+  $("#hkInfo").textContent = `Signed in as ${USER.email}. Invite code: ${S.couple.invite_code}. Everything syncs between your two phones and only your two accounts can see it.`;
 }
-$("#editProfiles").onclick = () => startOnboard(0);
+$("#editProfiles").onclick = startOnboard;
 $("#seeSynergy").onclick = showSynergy;
-$("#exportBtn").onclick = async () => {
-  const v = await sealState(KEY, SALT, S);
-  const blob = new Blob([JSON.stringify({ app: "usie", ...v, ct: b64chunk(v.ct) })], { type: "application/json" });
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `usie-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click();
-  toast("Backup downloaded. It's encrypted with your passcode.");
-};
-function b64chunk(u8) { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(s); }
-$("#importFile").onchange = async e => { const f = e.target.files[0]; if (!f) return;
-  try { const j = JSON.parse(await f.text()); if (j.app !== "usie") throw 0;
-    const vault = { v: 1, salt: j.salt, iv: j.iv, ct: unb64(j.ct) };
-    const key = j.salt === b64(SALT) ? KEY : await deriveKey(prompt("Passcode for this backup?") || "", unb64(j.salt));
-    S = await openState(key, vault); KEY = key; SALT = unb64(j.salt); await idb.set("vault", vault); toast("Restored. Welcome back."); show("feed");
-  } catch { toast("Couldn't restore that file (wrong file or passcode)."); } };
-$("#resetBtn").onclick = async () => { if (!confirm("Start over? This erases every post, note and profile on this device.")) return;
-  await idb.del("vault"); KEY = S = null; toast("Fresh start."); boot(); };
+$("#leaveBtn").onclick = () => { if (!confirm("Leave this Usie? If you're the last one out, everything is deleted for good.")) return;
+  busy($("#leaveBtn"), async () => { must(await sb.rpc("leave_couple")); teardown(); toast("You left. Hope it was just to rejoin."); entering = false; enterApp(); }); };
 
 boot();
 })();

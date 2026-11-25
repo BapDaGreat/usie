@@ -40,7 +40,7 @@
     <button class="tab" data-tab="grow">Grow</button>
     <button class="tab" data-tab="us">Us</button>
   </nav>
-  <button class="lockbtn" id="lockNow" title="Lock Usie" aria-label="Lock Usie"><svg><use href="#lock"/></svg></button>
+  <button class="lockbtn" id="lockNow" title="Sign out" aria-label="Sign out"><svg><use href="#lock"/></svg></button>
 </header>
 
 <main id="app" tabindex="-1">
@@ -54,9 +54,10 @@
       <p class="lede">Usie is your shared little corner of the internet. Post the blurry selfies, the inside jokes and the "saw this and thought of you" stuff. Only the two of you get the key. Everyone else can wait outside, holding their own hand.</p>
       <div class="cta-row">
         <button class="btn primary" id="startBtn">Start our Usie</button>
-        <button class="btn ghost" id="unlockBtn" hidden>Unlock our Usie</button>
+        <button class="btn ghost" id="unlockBtn">I already have a key</button>
       </div>
-      <p class="tiny">Takes about 4 minutes. Flirting not included, but heavily encouraged.</p>
+      <p class="tiny">Takes about 4 minutes each. Flirting not included, but heavily encouraged.</p>
+      <p class="setup-note" id="setupNote" hidden></p>
     </div>
     <figure class="hero-art" aria-hidden="true">
       <svg viewBox="0 0 420 380" class="couple">
@@ -98,30 +99,75 @@
     <li><span class="perk-ico">02</span><h3>A feed with a guest list of two</h3><p>Post a photo or a thought. Edit the caption when you think of a better pun at 2am.</p></li>
     <li><span class="perk-ico">03</span><h3>Silly, then soft</h3><p>Caption-this, would-you-rather and open-when notes. Plus weekly check-ins, a gratitude jar and a shared bucket list so you grow up together, not apart.</p></li>
   </ul>
-  <p class="footnote">Everything lives on this device, locked with your couple passcode. No ads, no strangers, no algorithm. Just you two.</p>
+  <p class="footnote">Each of you signs in on your own phone, then you link up with a secret code. Only your two accounts can see what's inside. No ads, no strangers, no algorithm. Just you two.</p>
 </section>
 
-<!-- ============ PASSCODE ============ -->
+<!-- ============ AUTH ============ -->
 <section class="view" id="v-lock" hidden>
   <div class="card lockcard">
     <svg class="lock-ico" aria-hidden="true"><use href="#lock"/></svg>
-    <h2 id="lockTitle">Make your secret handshake</h2>
-    <p id="lockSub">Pick a couple passcode only you two know. Your anniversary, the name of your first pet together, the thing he mispronounces. It locks and encrypts everything in here.</p>
-    <form id="lockForm" autocomplete="off">
-      <label class="sr" for="pass1">Couple passcode</label>
-      <input id="pass1" type="password" inputmode="text" minlength="4" required placeholder="At least 4 characters">
-      <label class="sr" for="pass2">Type it again</label>
-      <input id="pass2" type="password" minlength="4" placeholder="Again, with feeling">
+    <h2 id="lockTitle">Get your own key</h2>
+    <p id="lockSub">Each of you makes your own little account, then you link up with a secret code. Your partner does this on their phone too.</p>
+    <form id="lockForm" autocomplete="on">
+      <label class="sr" for="email">Email</label>
+      <input id="email" type="email" required autocomplete="email" placeholder="you@email.com">
+      <label class="sr" for="pass1">Password</label>
+      <input id="pass1" type="password" minlength="6" required autocomplete="current-password" placeholder="Password (6+ characters)">
       <p class="err" id="lockErr" role="alert"></p>
-      <button class="btn primary" type="submit" id="lockSubmit">Lock it in</button>
+      <button class="btn primary" type="submit" id="lockSubmit">Create my key</button>
     </form>
-    <button class="linkish" id="backToLanding">Back</button>
+    <p class="tiny"><button class="linkish" id="authToggle" type="button">Already have an account? Sign in</button></p>
+    <p class="tiny"><button class="linkish" id="magicBtn" type="button">Email me a magic link instead</button></p>
+    <button class="linkish" id="backToLanding" type="button">Back</button>
+  </div>
+</section>
+
+<!-- ============ COUPLE LINK ============ -->
+<section class="view" id="v-couple" hidden>
+  <h2 class="section-title center">Now, find <em>your person</em>.</h2>
+  <div class="cards">
+    <article class="card">
+      <p class="eyebrow">I'm going first</p>
+      <h3>Start a new Usie</h3>
+      <p class="muted">You'll get a 6-letter code. Send it to your person and they join from their phone.</p>
+      <fieldset class="q"><legend>I am...</legend><div class="chips">
+        <label class="chip"><input type="radio" name="myrole" value="her" checked><span>Her</span></label>
+        <label class="chip"><input type="radio" name="myrole" value="him"><span>Him</span></label>
+      </div></fieldset>
+      <button class="btn primary" id="createCouple">Make our code</button>
+    </article>
+    <article class="card">
+      <p class="eyebrow">They sent me a code</p>
+      <h3>Join your person</h3>
+      <p class="muted">Type the secret code they gave you. Two members max. Third wheels get politely bounced.</p>
+      <form id="joinForm" class="inline-form">
+        <label class="sr" for="joinCode">Invite code</label>
+        <input id="joinCode" required maxlength="6" autocapitalize="characters" placeholder="ABC123" class="code-input">
+        <button class="btn primary small">Join</button>
+      </form>
+    </article>
+  </div>
+  <p class="err center" id="coupleErr" role="alert"></p>
+  <p class="center"><button class="linkish" id="signOut2">Wrong account? Sign out</button></p>
+</section>
+
+<!-- ============ INVITE / WAITING ============ -->
+<section class="view" id="v-invite" hidden>
+  <div class="card lockcard">
+    <p class="eyebrow" id="invEyebrow">Your secret code</p>
+    <h2 id="invTitle">Send this to <em>your person</em></h2>
+    <p class="code-big" id="invCode"></p>
+    <p class="muted" id="invSub">They sign up on their phone, tap "I already have a key" or "Start our Usie", then choose "Join your person" and type this code.</p>
+    <div class="row-end center-row">
+      <button class="btn ghost small" id="copyCode">Copy invite</button>
+      <button class="btn primary" id="invNext">Continue</button>
+    </div>
   </div>
 </section>
 
 <!-- ============ ONBOARDING ============ -->
 <section class="view" id="v-onboard" hidden>
-  <div class="steps" aria-hidden="true"><span class="dot" data-s="0"></span><span class="dot" data-s="1"></span><span class="dot" data-s="2"></span></div>
+  
   <form class="card profile" id="profileForm">
     <p class="eyebrow" id="pfEyebrow">Ladies first</p>
     <h2 id="pfTitle">Let's meet <em>her</em></h2>
@@ -186,10 +232,7 @@
 <section class="view" id="v-feed" hidden>
   <div class="greet" id="greet"></div>
   <form class="card composer" id="composer">
-    <div class="who">
-      <span class="muted">Posting as</span>
-      <div class="seg" role="radiogroup" aria-label="Posting as" id="whoSeg"></div>
-    </div>
+    <div class="who"><span class="muted">Posting as</span> <span class="me-pill" id="whoMe"></span></div>
     <label class="sr" for="postText">Write something</label>
     <textarea id="postText" rows="2" maxlength="500" placeholder="Say something only they'd get..."></textarea>
     <div class="composer-row">
@@ -214,13 +257,12 @@
   <div class="cards">
     <article class="card game" id="gCaption">
       <h3>Caption this</h3>
-      <p class="muted">Pick a photo from your feed (or a silly prompt). You both write a caption. Loser buys snacks.</p>
+      <p class="muted">Pick a photo from your feed (or a silly prompt). Write your caption, then your person adds theirs on their phone. Loser buys snacks.</p>
       <div class="cap-stage" id="capStage"></div>
       <div class="grid2">
-        <label><span class="her-c" data-cap="her">Her caption</span><input id="capHer" maxlength="120" placeholder="her best line"></label>
-        <label><span class="him-c" data-cap="him">His caption</span><input id="capHim" maxlength="120" placeholder="his best line"></label>
+        <label class="full"><span data-cap="me">Your caption</span><input id="capMine" maxlength="120" placeholder="your best line"></label>
       </div>
-      <div class="row-end"><button class="btn ghost small" id="capShuffle">New one</button><button class="btn primary small" id="capSave">Save to feed</button></div>
+      <div class="row-end"><button class="btn ghost small" id="capShuffle">New one</button><button class="btn primary small" id="capSave">Start the caption-off</button></div>
     </article>
 
     <article class="card game" id="gWyr">
@@ -233,9 +275,9 @@
 
     <article class="card game wide" id="gNotes">
       <h3>Open when... notes</h3>
-      <p class="muted">Write a little envelope for later. "Open when you miss me." "Open when I'm being annoying." Sealed until they tap it.</p>
+      <p class="muted">Write a little envelope for your person. "Open when you miss me." "Open when I'm being annoying." It stays sealed until they open it on their phone.</p>
       <form class="notes-form" id="noteForm">
-        <div class="seg small" role="radiogroup" aria-label="From" id="noteFrom"></div>
+        
         <label class="sr" for="noteWhen">Open when</label>
         <input id="noteWhen" required maxlength="60" placeholder="Open when... you can't sleep">
         <label class="sr" for="noteBody">Your note</label>
@@ -255,7 +297,7 @@
       <h3>Weekly check-in</h3>
       <p class="muted">Five minutes, once a week, no phones (except this one). Be gentle, be honest.</p>
       <form id="checkForm" class="check">
-        <div class="seg small" role="radiogroup" aria-label="Checking in as" id="checkWho"></div>
+        <p class="tiny full" id="checkWho"></p>
         <label>How loved did you feel this week? <output id="o1">7</output>
           <input type="range" min="1" max="10" value="7" id="c1"></label>
         <label>How much quality time did we get? <output id="o2">6</output>
@@ -305,14 +347,13 @@
   <div class="cards" id="usCards"></div>
   <div class="card wide">
     <h3>Housekeeping</h3>
-    <p class="muted">Usie keeps everything on this device, encrypted with your couple passcode. Make a backup now and then, especially before clearing your browser.</p>
+    <p class="muted" id="hkInfo"></p>
     <div class="row-wrap">
-      <button class="btn ghost small" id="editProfiles">Edit our profiles</button>
+      <button class="btn ghost small" id="editProfiles">Edit my profile</button>
       <button class="btn ghost small" id="seeSynergy">See our synergy again</button>
-      <button class="btn ghost small" id="exportBtn">Download backup</button>
-      <label class="btn ghost small" for="importFile">Restore backup</label>
-      <input type="file" id="importFile" accept="application/json" class="sr">
-      <button class="btn danger small" id="resetBtn">Start over</button>
+      <button class="btn ghost small" id="showCode">Show our invite code</button>
+      <button class="btn ghost small" id="signOutBtn">Sign out</button>
+      <button class="btn danger small" id="leaveBtn">Leave this Usie</button>
     </div>
   </div>
 </section>
@@ -320,7 +361,9 @@
 </main>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
-<footer class="foot">Made with an unreasonable amount of heart. Usie stays on this device.</footer>
+<footer class="foot">Made with an unreasonable amount of heart. Private to the two of you.</footer>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
