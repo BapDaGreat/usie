@@ -271,3 +271,36 @@ end $$;
 
 -- tell PostgREST to pick up the new tables right away
 notify pgrst, 'reload schema';
+-- ---------- instant sign-up (no confirmation email) ----------
+-- Supabase's built-in mailer is rate limited and "Confirm email" is on, which blocked partners from
+-- signing up. register() creates an already-confirmed email/password user; the client then calls
+-- signInWithPassword. If the email already exists it never touches the password, it just says 'exists'.
+create or replace function public.register(p_email text, p_password text)
+returns text language plpgsql security definer set search_path = public, extensions, auth as $$
+declare em text := lower(trim(p_email)); uid uuid := gen_random_uuid(); existing auth.users;
+begin
+  if em !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then raise exception 'That email looks a little off'; end if;
+  if length(coalesce(p_password, '')) < 6 then raise exception 'Password needs at least 6 characters'; end if;
+  select * into existing from auth.users where lower(email) = em limit 1;
+  if found then
+    if existing.email_confirmed_at is null then
+      update auth.users set email_confirmed_at = now(), updated_at = now() where id = existing.id;
+    end if;
+    return 'exists';
+  end if;
+  insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+    raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+    confirmation_token, recovery_token, email_change_token_new, email_change, email_change_token_current,
+    phone_change, phone_change_token, reauthentication_token)
+  values ('00000000-0000-0000-0000-000000000000', uid, 'authenticated', 'authenticated', em,
+    crypt(p_password, gen_salt('bf')), now(),
+    '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb, now(), now(),
+    '', '', '', '', '', '', '', '');
+  insert into auth.identities (provider_id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
+  values (uid::text, uid, jsonb_build_object('sub', uid::text, 'email', em, 'email_verified', true, 'phone_verified', false),
+    'email', now(), now(), now());
+  return 'created';
+end $$;
+revoke all on function public.register(text, text) from public;
+grant execute on function public.register(text, text) to anon, authenticated;
+notify pgrst, 'reload schema';

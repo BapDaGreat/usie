@@ -18,7 +18,9 @@ Couples-only web app: each partner signs in on their own phone, one creates a co
 - RPCs: `create_couple(role)`, `join_couple(code)`, `leave_couple()` (security definer)
 - RLS: only the two members of a couple can read/write its rows; photos live at `<couple_id>/<file>.jpg` and storage policies check membership too. Anonymous users get nothing.
 
-## Supabase dashboard settings
-- Authentication → URL Configuration: Site URL `https://bapdagreat.github.io/usie/`, and add the same URL to Redirect URLs.
-- Authentication → Sign In / Providers → Email: "Confirm email" is on by default (partners must tap the email link). Turn it off for instant sign-up.
-- Supabase's built-in email sender is rate limited; add custom SMTP (Authentication → Emails → SMTP) before real use.
+## Sign-up
+Sign-up is instant: the client calls the `register(email, password)` RPC, which creates an already-confirmed email/password user (no confirmation email, so Supabase's built-in mailer rate limit can't block anyone), then signs in with `signInWithPassword`. If the email already exists it only answers `exists` and never changes the password. Trade-off: email addresses aren't verified.
+
+## Supabase dashboard settings (optional)
+- Authentication → URL Configuration: Site URL `https://bapdagreat.github.io/usie/` (only matters for password-reset emails).
+- Add custom SMTP (Authentication → Emails → SMTP) if you later want password resets or magic links.

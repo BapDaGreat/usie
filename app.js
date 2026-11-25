@@ -116,9 +116,10 @@ function friendly(e) {
   const m = (e && (e.message || e.error_description || e.msg)) || String(e || "");
   if (/PGRST205|schema cache|does not exist/i.test(m)) return "Usie's database isn't set up yet. Run supabase/schema.sql in the Supabase SQL Editor first.";
   if (/Invalid login credentials/i.test(m)) return "That email and password don't match. Try again, cutie.";
-  if (/Email not confirmed/i.test(m)) return "Check your inbox and tap the confirmation link first.";
+  if (/Email not confirmed/i.test(m)) return "Your account needs a quick confirm. Tap \"Create my key\" again with the same email and password.";
+  if (/email looks|at least 6/i.test(m)) return m;
   if (/already registered/i.test(m)) return "You already have an account. Tap \"Sign in\" below.";
-  if (/rate limit|too many/i.test(m)) return "Too many emails too fast. Wait a minute and try again.";
+  if (/rate limit|too many/i.test(m)) return "Too many tries in a row. Take a breath and try again in a minute.";
   if (/Failed to fetch|NetworkError/i.test(m)) return "Can't reach the love server. Check your internet.";
   return m.replace(/^.*?:\s(?=[A-Z])/, "") || "Something went wrong.";
 }
@@ -244,7 +245,7 @@ $("#authToggle").onclick = () => openAuth(authMode === "signup" ? "signin" : "si
 function openAuth(mode) {
   authMode = mode; const up = mode === "signup";
   $("#lockTitle").textContent = up ? "Get your own key" : "Knock knock. Who's cute?";
-  $("#lockSub").textContent = up ? "Each of you makes your own little account, then you link up with a secret code. Your person does this on their phone too."
+  $("#lockSub").textContent = up ? "Each of you makes your own little account, then you link up with a secret code. No confirmation email, you're in right away."
     : "Sign in with your email and password. If you're not one of the two, this is awkward. Please leave.";
   $("#lockSubmit").textContent = up ? "Create my key" : "Let me in";
   $("#authToggle").textContent = up ? "Already have an account? Sign in" : "New here? Create an account";
@@ -258,9 +259,16 @@ $("#lockForm").onsubmit = async e => {
   err.textContent = "";
   await busy($("#lockSubmit"), async () => {
     if (authMode === "signup") {
-      const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo() } });
-      if (error) { err.textContent = friendly(error); return; }
-      if (!data.session) { err.textContent = ""; toast("Check your inbox!"); $("#lockSub").textContent = `We sent a confirmation link to ${email}. Tap it on this phone and you'll land right back here, signed in.`; return; }
+      // Instant sign-up via the register() RPC (account is created already confirmed, no email needed)
+      const reg = await sb.rpc("register", { p_email: email, p_password: password });
+      if (reg.error) { err.textContent = friendly(reg.error); return; }
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) {
+        if (reg.data === "exists") { openAuth("signin"); $("#email").value = email;
+          $("#lockErr").textContent = "You already have an account with this email. Sign in with the password you used before."; return; }
+        err.textContent = friendly(error); return;
+      }
+      toast(reg.data === "exists" ? "Welcome back! You already had a key." : "Key made. Welcome to Usie!");
       USER = data.user; enterApp();
     } else {
       const { data, error } = await sb.auth.signInWithPassword({ email, password });

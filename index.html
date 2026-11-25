@@ -107,7 +107,7 @@
   <div class="card lockcard">
     <svg class="lock-ico" aria-hidden="true"><use href="#lock"/></svg>
     <h2 id="lockTitle">Get your own key</h2>
-    <p id="lockSub">Each of you makes your own little account, then you link up with a secret code. Your partner does this on their phone too.</p>
+    <p id="lockSub">Each of you makes your own little account, then you link up with a secret code. No confirmation email, you're in right away.</p>
     <form id="lockForm" autocomplete="on">
       <label class="sr" for="email">Email</label>
       <input id="email" type="email" required autocomplete="email" placeholder="you@email.com">
@@ -117,7 +117,7 @@
       <button class="btn primary" type="submit" id="lockSubmit">Create my key</button>
     </form>
     <p class="tiny"><button class="linkish" id="authToggle" type="button">Already have an account? Sign in</button></p>
-    <p class="tiny"><button class="linkish" id="magicBtn" type="button">Email me a magic link instead</button></p>
+    <p class="tiny" hidden><button class="linkish" id="magicBtn" type="button">Email me a magic link instead</button></p>
     <button class="linkish" id="backToLanding" type="button">Back</button>
   </div>
 </section>
