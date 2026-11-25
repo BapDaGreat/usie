@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Usie · a tiny private world for two</title>
+<meta name="description" content="Usie is a cute, couples-only little corner of the internet. Two profiles, one shared feed, silly games and soft check-ins. Strictly no third wheels.">
+<meta name="theme-color" content="#FFF4EC">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M32 56S6 40 6 22a13 13 0 0 1 26-4 13 13 0 0 1 26 4c0 18-26 34-26 34z' fill='%23E2455C'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;0,9..144,900;1,9..144,600&family=Nunito:wght@500;700;800&family=Caveat:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#app">Skip to content</a>
+
+<!-- floating hearts backdrop -->
+<div class="sky" aria-hidden="true">
+  <svg class="float f1" viewBox="0 0 40 40"><use href="#heart"/></svg>
+  <svg class="float f2" viewBox="0 0 40 40"><use href="#heart"/></svg>
+  <svg class="float f3" viewBox="0 0 40 40"><use href="#spark"/></svg>
+  <svg class="float f4" viewBox="0 0 40 40"><use href="#heart"/></svg>
+  <svg class="float f5" viewBox="0 0 40 40"><use href="#spark"/></svg>
+</div>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="heart" viewBox="0 0 40 40"><path d="M20 35S3 24.5 3 13.5A8.5 8.5 0 0 1 20 10a8.5 8.5 0 0 1 17 3.5C37 24.5 20 35 20 35z" fill="currentColor"/></symbol>
+    <symbol id="spark" viewBox="0 0 40 40"><path d="M20 2c1.5 9 4 12 18 18-14 6-16.5 9-18 18-1.5-9-4-12-18-18C16 14 18.5 11 20 2z" fill="currentColor"/></symbol>
+    <symbol id="lock" viewBox="0 0 24 24"><path d="M7 10V7a5 5 0 0 1 10 0v3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><rect x="4" y="10" width="16" height="11" rx="4" fill="currentColor"/></symbol>
+  </defs>
+</svg>
+
+<header class="topbar" id="topbar" hidden>
+  <div class="brand"><svg class="brand-heart"><use href="#heart"/></svg> Usie</div>
+  <nav class="tabs" aria-label="Sections">
+    <button class="tab" data-tab="feed">Our feed</button>
+    <button class="tab" data-tab="play">Play</button>
+    <button class="tab" data-tab="grow">Grow</button>
+    <button class="tab" data-tab="us">Us</button>
+  </nav>
+  <button class="lockbtn" id="lockNow" title="Lock Usie" aria-label="Lock Usie"><svg><use href="#lock"/></svg></button>
+</header>
+
+<main id="app" tabindex="-1">
+
+<!-- ============ LANDING ============ -->
+<section class="view" id="v-landing">
+  <div class="hero">
+    <div class="hero-copy">
+      <p class="eyebrow">Population: two. Strictly no third wheels.</p>
+      <h1>A tiny private world<br>for <em>just us two.</em></h1>
+      <p class="lede">Usie is your shared little corner of the internet. Post the blurry selfies, the inside jokes and the "saw this and thought of you" stuff. Only the two of you get the key. Everyone else can wait outside, holding their own hand.</p>
+      <div class="cta-row">
+        <button class="btn primary" id="startBtn">Start our Usie</button>
+        <button class="btn ghost" id="unlockBtn" hidden>Unlock our Usie</button>
+      </div>
+      <p class="tiny">Takes about 4 minutes. Flirting not included, but heavily encouraged.</p>
+    </div>
+    <figure class="hero-art" aria-hidden="true">
+      <svg viewBox="0 0 420 380" class="couple">
+        <ellipse cx="210" cy="350" rx="170" ry="16" fill="#F3D3C7"/>
+        <!-- her -->
+        <g class="her">
+          <path d="M70 330c-6-80 10-150 70-160s82 70 70 160z" fill="#E2455C"/>
+          <circle cx="140" cy="135" r="58" fill="#FFD7BF"/>
+          <path d="M82 140c-6-50 26-82 64-80 40 2 62 36 54 70-14-22-34-36-58-38-22 6-40 24-60 48z" fill="#5A2A3A"/>
+          <circle cx="94" cy="132" r="16" fill="#5A2A3A"/>
+          <g class="blink"><ellipse cx="124" cy="146" rx="5" ry="7" fill="#3B1F2B"/><ellipse cx="160" cy="146" rx="5" ry="7" fill="#3B1F2B"/></g>
+          <ellipse cx="114" cy="166" rx="10" ry="6" fill="#F7A1AE" opacity=".8"/>
+          <ellipse cx="172" cy="166" rx="10" ry="6" fill="#F7A1AE" opacity=".8"/>
+          <path d="M132 170q10 9 20 0" stroke="#3B1F2B" stroke-width="4" fill="none" stroke-linecap="round"/>
+        </g>
+        <!-- him -->
+        <g class="him">
+          <path d="M210 330c-6-82 14-152 72-160s80 72 70 160z" fill="#5B8C7A"/>
+          <circle cx="282" cy="132" r="60" fill="#E9B48F"/>
+          <path d="M224 118c4-40 36-60 70-56 32 4 52 30 46 62-10-16-30-24-50-22-16-14-40-10-66 16z" fill="#2E1C1F"/>
+          <g class="blink"><ellipse cx="264" cy="144" rx="5" ry="7" fill="#3B1F2B"/><ellipse cx="300" cy="144" rx="5" ry="7" fill="#3B1F2B"/></g>
+          <ellipse cx="252" cy="164" rx="10" ry="6" fill="#E98A86" opacity=".7"/>
+          <ellipse cx="312" cy="164" rx="10" ry="6" fill="#E98A86" opacity=".7"/>
+          <path d="M272 168q10 10 20 0" stroke="#3B1F2B" stroke-width="4" fill="none" stroke-linecap="round"/>
+        </g>
+        <!-- hands -->
+        <path d="M180 262q30 16 54 0" stroke="#FFD7BF" stroke-width="18" fill="none" stroke-linecap="round"/>
+        <circle cx="210" cy="266" r="12" fill="#E9B48F"/>
+        <g class="pop"><use href="#heart" x="186" y="40" width="48" height="48" color="#E2455C"/></g>
+        <g class="pop p2"><use href="#heart" x="236" y="16" width="26" height="26" color="#F7A1AE"/></g>
+        <g class="pop p3"><use href="#spark" x="160" y="22" width="22" height="22" color="#F2B84B"/></g>
+      </svg>
+      <figcaption class="sticky-note">"you're my favourite notification"</figcaption>
+    </figure>
+  </div>
+
+  <ul class="perks">
+    <li><span class="perk-ico">01</span><h3>Two profiles, one plot twist</h3><p>Her page, his page, then a synergy reading that tells you who's stealing the blanket tonight.</p></li>
+    <li><span class="perk-ico">02</span><h3>A feed with a guest list of two</h3><p>Post a photo or a thought. Edit the caption when you think of a better pun at 2am.</p></li>
+    <li><span class="perk-ico">03</span><h3>Silly, then soft</h3><p>Caption-this, would-you-rather and open-when notes. Plus weekly check-ins, a gratitude jar and a shared bucket list so you grow up together, not apart.</p></li>
+  </ul>
+  <p class="footnote">Everything lives on this device, locked with your couple passcode. No ads, no strangers, no algorithm. Just you two.</p>
+</section>
+
+<!-- ============ PASSCODE ============ -->
+<section class="view" id="v-lock" hidden>
+  <div class="card lockcard">
+    <svg class="lock-ico" aria-hidden="true"><use href="#lock"/></svg>
+    <h2 id="lockTitle">Make your secret handshake</h2>
+    <p id="lockSub">Pick a couple passcode only you two know. Your anniversary, the name of your first pet together, the thing he mispronounces. It locks and encrypts everything in here.</p>
+    <form id="lockForm" autocomplete="off">
+      <label class="sr" for="pass1">Couple passcode</label>
+      <input id="pass1" type="password" inputmode="text" minlength="4" required placeholder="At least 4 characters">
+      <label class="sr" for="pass2">Type it again</label>
+      <input id="pass2" type="password" minlength="4" placeholder="Again, with feeling">
+      <p class="err" id="lockErr" role="alert"></p>
+      <button class="btn primary" type="submit" id="lockSubmit">Lock it in</button>
+    </form>
+    <button class="linkish" id="backToLanding">Back</button>
+  </div>
+</section>
+
+<!-- ============ ONBOARDING ============ -->
+<section class="view" id="v-onboard" hidden>
+  <div class="steps" aria-hidden="true"><span class="dot" data-s="0"></span><span class="dot" data-s="1"></span><span class="dot" data-s="2"></span></div>
+  <form class="card profile" id="profileForm">
+    <p class="eyebrow" id="pfEyebrow">Ladies first</p>
+    <h2 id="pfTitle">Let's meet <em>her</em></h2>
+    <p class="muted" id="pfSub">Tell us about the one who laughs at her own jokes before the punchline. Answer honestly. He'll see this.</p>
+
+    <div class="photo-pick">
+      <label class="avatar-drop" for="pfPhoto">
+        <img id="pfPreview" alt="" hidden>
+        <span class="avatar-empty" id="pfEmpty"><svg viewBox="0 0 40 40"><use href="#heart"/></svg><b>Add a cute photo</b><small>the one where you look unbothered</small></span>
+      </label>
+      <input type="file" id="pfPhoto" accept="image/*" class="sr">
+    </div>
+
+    <div class="grid2">
+      <label>Name <input name="name" required maxlength="40" placeholder="Her actual name"></label>
+      <label>Pet name <input name="nick" maxlength="30" placeholder="what you call her"></label>
+      <label>Birthday <input name="bday" type="date"></label>
+      <label>Love language
+        <select name="lang" required>
+          <option value="">Choose one</option>
+          <option>Words of affirmation</option>
+          <option>Quality time</option>
+          <option>Physical touch</option>
+          <option>Acts of service</option>
+          <option>Receiving gifts</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="pfQuestions"></div>
+
+    <label class="full">The first thing you noticed about them <textarea name="noticed" rows="2" maxlength="180" placeholder="be specific, be a little embarrassing"></textarea></label>
+    <label class="full">Your comfort food <input name="food" maxlength="60" placeholder="the one you won't share"></label>
+
+    <div class="row-end">
+      <button class="btn ghost" type="button" id="pfBack" hidden>Back</button>
+      <button class="btn primary" type="submit" id="pfNext">Next up: him</button>
+    </div>
+  </form>
+</section>
+
+<!-- ============ SYNERGY ============ -->
+<section class="view" id="v-synergy" hidden>
+  <div class="card synergy">
+    <p class="eyebrow">The official, very scientific reading</p>
+    <div class="duo">
+      <figure><img id="synHer" alt=""><figcaption id="synHerName"></figcaption></figure>
+      <div class="meter" role="img" id="synMeter">
+        <svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="50" class="track"/><circle cx="60" cy="60" r="50" class="fill" id="synArc"/></svg>
+        <b id="synScore">0%</b><small>synergy</small>
+      </div>
+      <figure><img id="synHim" alt=""><figcaption id="synHimName"></figcaption></figure>
+    </div>
+    <h2 id="synHeadline"></h2>
+    <p class="muted" id="synBlurb"></p>
+    <ul class="syn-list" id="synList"></ul>
+    <div class="row-end"><button class="btn ghost" id="synRedo">Edit profiles</button><button class="btn primary" id="synGo">Open our feed</button></div>
+  </div>
+</section>
+
+<!-- ============ FEED ============ -->
+<section class="view" id="v-feed" hidden>
+  <div class="greet" id="greet"></div>
+  <form class="card composer" id="composer">
+    <div class="who">
+      <span class="muted">Posting as</span>
+      <div class="seg" role="radiogroup" aria-label="Posting as" id="whoSeg"></div>
+    </div>
+    <label class="sr" for="postText">Write something</label>
+    <textarea id="postText" rows="2" maxlength="500" placeholder="Say something only they'd get..."></textarea>
+    <div class="composer-row">
+      <label class="btn ghost small" for="postPhoto">Add photo</label>
+      <input type="file" id="postPhoto" accept="image/*" class="sr">
+      <span class="attach" id="attachName"></span>
+      <button class="btn primary small" type="submit">Post it, babe</button>
+    </div>
+    <img id="postPreview" class="post-preview" alt="" hidden>
+  </form>
+  <div class="prompt-chip" id="promptChip"></div>
+  <ol class="feed" id="feed" aria-live="polite"></ol>
+  <div class="empty" id="feedEmpty">
+    <svg viewBox="0 0 120 90" aria-hidden="true"><rect x="10" y="20" width="100" height="62" rx="10" fill="#FFE3E8"/><path d="M10 28l50 30 50-30" fill="none" stroke="#E2455C" stroke-width="4"/><use href="#heart" x="48" y="2" width="24" height="24" color="#E2455C"/></svg>
+    <p>It's quiet in here. Too quiet. Post the first thing. A photo of their sleepy face counts.</p>
+  </div>
+</section>
+
+<!-- ============ PLAY ============ -->
+<section class="view" id="v-play" hidden>
+  <h2 class="section-title">Play <em>nice</em>. Or don't.</h2>
+  <div class="cards">
+    <article class="card game" id="gCaption">
+      <h3>Caption this</h3>
+      <p class="muted">Pick a photo from your feed (or a silly prompt). You both write a caption. Loser buys snacks.</p>
+      <div class="cap-stage" id="capStage"></div>
+      <div class="grid2">
+        <label><span class="her-c" data-cap="her">Her caption</span><input id="capHer" maxlength="120" placeholder="her best line"></label>
+        <label><span class="him-c" data-cap="him">His caption</span><input id="capHim" maxlength="120" placeholder="his best line"></label>
+      </div>
+      <div class="row-end"><button class="btn ghost small" id="capShuffle">New one</button><button class="btn primary small" id="capSave">Save to feed</button></div>
+    </article>
+
+    <article class="card game" id="gWyr">
+      <h3>Would you rather</h3>
+      <p class="tiny" id="wyrQ"></p>
+      <div class="wyr-opts" id="wyrOpts"></div>
+      <p class="wyr-res" id="wyrRes" aria-live="polite"></p>
+      <div class="row-end"><button class="btn ghost small" id="wyrNext">Next question</button></div>
+    </article>
+
+    <article class="card game wide" id="gNotes">
+      <h3>Open when... notes</h3>
+      <p class="muted">Write a little envelope for later. "Open when you miss me." "Open when I'm being annoying." Sealed until they tap it.</p>
+      <form class="notes-form" id="noteForm">
+        <div class="seg small" role="radiogroup" aria-label="From" id="noteFrom"></div>
+        <label class="sr" for="noteWhen">Open when</label>
+        <input id="noteWhen" required maxlength="60" placeholder="Open when... you can't sleep">
+        <label class="sr" for="noteBody">Your note</label>
+        <textarea id="noteBody" required rows="2" maxlength="400" placeholder="the sweet part"></textarea>
+        <button class="btn primary small">Seal it with a kiss</button>
+      </form>
+      <ul class="envelopes" id="envelopes"></ul>
+    </article>
+  </div>
+</section>
+
+<!-- ============ GROW ============ -->
+<section class="view" id="v-grow" hidden>
+  <h2 class="section-title">Grow <em>together</em>, like two very cute houseplants.</h2>
+  <div class="cards">
+    <article class="card wide" id="gCheck">
+      <h3>Weekly check-in</h3>
+      <p class="muted">Five minutes, once a week, no phones (except this one). Be gentle, be honest.</p>
+      <form id="checkForm" class="check">
+        <div class="seg small" role="radiogroup" aria-label="Checking in as" id="checkWho"></div>
+        <label>How loved did you feel this week? <output id="o1">7</output>
+          <input type="range" min="1" max="10" value="7" id="c1"></label>
+        <label>How much quality time did we get? <output id="o2">6</output>
+          <input type="range" min="1" max="10" value="6" id="c2"></label>
+        <label class="full">One thing I loved this week <input id="c3" maxlength="140" placeholder="when you..."></label>
+        <label class="full">One thing I'd love more of <input id="c4" maxlength="140" placeholder="could we..."></label>
+        <button class="btn primary small">Save check-in</button>
+      </form>
+      <ul class="checks" id="checks"></ul>
+    </article>
+
+    <article class="card" id="gJar">
+      <h3>Gratitude jar</h3>
+      <div class="jar-wrap">
+        <svg viewBox="0 0 160 190" class="jar" aria-hidden="true">
+          <rect x="44" y="8" width="72" height="20" rx="6" fill="#C98F6B"/>
+          <path d="M40 30h80c8 0 12 8 12 16v112c0 14-10 24-24 24H52c-14 0-24-10-24-24V46c0-8 4-16 12-16z" fill="#FFF" fill-opacity=".55" stroke="#E2455C" stroke-width="4"/>
+          <g id="jarHearts"></g>
+        </svg>
+        <b class="jar-count" id="jarCount">0</b>
+      </div>
+      <form id="jarForm" class="inline-form">
+        <label class="sr" for="jarText">I'm grateful for</label>
+        <input id="jarText" required maxlength="140" placeholder="I'm grateful you...">
+        <button class="btn primary small">Drop it in</button>
+      </form>
+      <button class="linkish" id="jarPull">Pull one out at random</button>
+      <p class="jar-pulled" id="jarPulled" aria-live="polite"></p>
+    </article>
+
+    <article class="card" id="gBucket">
+      <h3>Our bucket list</h3>
+      <form id="bucketForm" class="inline-form">
+        <label class="sr" for="bucketText">Add a goal</label>
+        <input id="bucketText" required maxlength="100" placeholder="Learn to make her lola's adobo">
+        <button class="btn primary small">Add</button>
+      </form>
+      <ul class="bucket" id="bucket"></ul>
+      <p class="tiny" id="bucketMeta"></p>
+    </article>
+  </div>
+</section>
+
+<!-- ============ US ============ -->
+<section class="view" id="v-us" hidden>
+  <h2 class="section-title">The two <em>main characters</em></h2>
+  <div class="cards" id="usCards"></div>
+  <div class="card wide">
+    <h3>Housekeeping</h3>
+    <p class="muted">Usie keeps everything on this device, encrypted with your couple passcode. Make a backup now and then, especially before clearing your browser.</p>
+    <div class="row-wrap">
+      <button class="btn ghost small" id="editProfiles">Edit our profiles</button>
+      <button class="btn ghost small" id="seeSynergy">See our synergy again</button>
+      <button class="btn ghost small" id="exportBtn">Download backup</button>
+      <label class="btn ghost small" for="importFile">Restore backup</label>
+      <input type="file" id="importFile" accept="application/json" class="sr">
+      <button class="btn danger small" id="resetBtn">Start over</button>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<footer class="foot">Made with an unreasonable amount of heart. Usie stays on this device.</footer>
+<script src="app.js"></script>
+</body>
+</html>
